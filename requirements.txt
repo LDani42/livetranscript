@@ -1,2 +1,2 @@
 streamlit>=1.22.0
-assemblyai[extras]>=0.5.0
+assemblyai
