@@ -1,2 +1,2 @@
 streamlit>=1.24.0
-assemblyai[extras]>=0.17.0
+requests>=2.28.0
