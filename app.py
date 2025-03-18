@@ -22,8 +22,6 @@ if 'is_processing' not in st.session_state:
     st.session_state.is_processing = False
 if 'final_transcript' not in st.session_state:
     st.session_state.final_transcript = []
-if 'audio_file' not in st.session_state:
-    st.session_state.audio_file = None
 
 # Function to transcribe audio
 def transcribe_audio(audio_file):
@@ -33,7 +31,7 @@ def transcribe_audio(audio_file):
         
         # Save the audio file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
-            temp_audio.write(audio_file.getvalue())
+            temp_audio.write(audio_file)
             temp_path = temp_audio.name
         
         st.session_state.is_processing = True
@@ -60,23 +58,20 @@ def transcribe_audio(audio_file):
     finally:
         st.session_state.is_processing = False
 
-# Audio recorder using Streamlit's native audio recorder
-st.subheader("Record Audio")
-audio_bytes = st.audio_recorder(pause_threshold=2.0, sample_rate=16000)
+# File upload for audio
+st.subheader("Upload Audio File")
+uploaded_file = st.file_uploader("Choose an audio file", type=["wav", "mp3", "m4a", "ogg"])
 
-if audio_bytes:
-    # Display the recorded audio
-    st.audio(audio_bytes, format="audio/wav")
+if uploaded_file is not None:
+    # Display the uploaded audio
+    st.audio(uploaded_file)
     
-    # Store the audio in session state
-    if st.session_state.audio_file != audio_bytes:
-        st.session_state.audio_file = audio_bytes
-        
-        # Transcribe in a separate thread
+    # Add a button to transcribe the uploaded file
+    if st.button("Transcribe Audio"):
         if api_key:
             threading.Thread(
                 target=transcribe_audio, 
-                args=(st.io.BytesIO(audio_bytes),), 
+                args=(uploaded_file.getvalue(),), 
                 daemon=True
             ).start()
         else:
@@ -144,39 +139,17 @@ with st.expander("How to Use"):
     ## Instructions
     
     1. Enter your AssemblyAI API key in the field above.
-    2. Click the microphone button to start recording.
-    3. Speak clearly into your microphone.
-    4. Click the microphone button again to stop recording.
-    5. The app will process your audio and display the transcription.
+    2. Upload an audio file (WAV, MP3, M4A, or OGG format).
+    3. Click "Transcribe Audio" to process the file.
+    4. Wait for the transcription to complete.
+    5. View the transcription results below.
     6. You can download all transcriptions as a text file.
     
     ## Notes
     
     - This app uses AssemblyAI's transcription API.
-    - The audio is processed after recording is complete.
     - Longer recordings may take more time to process.
     """)
 
-# Setup instructions
-with st.expander("Installation Instructions"):
-    st.markdown("""
-    ## Prerequisites
-    1. Python installed on your system
-    2. An AssemblyAI account with a credit card set up
-    
-    ## Setup Instructions
-    1. Install required Python packages:
-       ```
-       pip install streamlit assemblyai
-       ```
-       
-    2. Run the app:
-       ```
-       streamlit run app.py
-       ```
-       
-    3. Enter your AssemblyAI API key and start transcribing!
-    """)
-
 # Footer
-st.caption("Note: This app uses Streamlit's built-in audio recorder and AssemblyAI's transcription API.")
+st.caption("Note: This app uses AssemblyAI's transcription API for audio files.")
