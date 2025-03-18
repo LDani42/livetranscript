@@ -1,2 +1,2 @@
-streamlit
-assemblyai
+streamlit>=1.25.0
+assemblyai>=0.5.0
