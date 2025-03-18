@@ -3,54 +3,28 @@ import requests
 import json
 import time
 import base64
-from streamlit.components.v1 import html
+import os
 
 # App title and description
 st.title("Live Audio Transcription")
-st.markdown("This app uses AssemblyAI to transcribe your speech. Record audio in your browser, then upload for transcription.")
+st.markdown("This app uses AssemblyAI to transcribe your speech.")
 
-# Initialize session state
+# Initialize session state variables
 if 'transcription_id' not in st.session_state:
     st.session_state.transcription_id = None
-if 'transcription_status' not in st.session_state:
-    st.session_state.transcription_status = None
 if 'transcription_result' not in st.session_state:
     st.session_state.transcription_result = None
-if 'audio_data' not in st.session_state:
-    st.session_state.audio_data = None
-
-# Function to handle audio data from frontend
-def handle_audio_data():
-    if st.session_state.audio_data and st.session_state.audio_data != "":
-        process_audio(st.session_state.audio_data)
-        
-# Function to process audio data
-def process_audio(audio_base64):
-    with st.spinner("Processing audio..."):
-        try:
-            # Decode base64 audio data
-            audio_bytes = base64.b64decode(audio_base64)
-            
-            # Upload audio to AssemblyAI
-            upload_url = upload_audio(audio_bytes)
-            
-            if upload_url:
-                # Start transcription
-                transcription_id = start_transcription(upload_url)
-                if transcription_id:
-                    st.session_state.transcription_id = transcription_id
-                    st.experimental_rerun()
-        except Exception as e:
-            st.error(f"Error processing audio: {str(e)}")
 
 # Get API key from Streamlit secrets
-api_key = st.secrets["assemblyai_api_key"]
+api_key = st.secrets.get("assemblyai_api_key", "")
+if not api_key:
+    st.error("Please set your AssemblyAI API key in the Streamlit secrets")
 
 # AssemblyAI API Endpoints
 upload_endpoint = "https://api.assemblyai.com/v2/upload"
 transcript_endpoint = "https://api.assemblyai.com/v2/transcript"
 
-# Set up headers for API requests
+# Headers for API requests
 headers = {
     "Authorization": api_key,
     "Content-Type": "application/json"
@@ -59,7 +33,7 @@ headers = {
 # Function to upload audio to AssemblyAI
 def upload_audio(audio_data):
     upload_headers = {
-        "Authorization": api_key,
+        "Authorization": api_key
     }
     
     response = requests.post(
@@ -74,11 +48,11 @@ def upload_audio(audio_data):
         st.error(f"Error uploading audio: {response.text}")
         return None
 
-# Function to start transcription with AssemblyAI
+# Function to start transcription
 def start_transcription(audio_url):
     data = {
         "audio_url": audio_url,
-        "language_detection": True  # Automatically detect the language
+        "language_detection": True
     }
     
     response = requests.post(
@@ -105,122 +79,117 @@ def check_transcription_status(transcription_id):
         st.error(f"Error checking transcription status: {response.text}")
         return None
 
-# Use Streamlit's component HTML for the audio recorder
-def recorder_component():
-    component_value = st.session_state.get("audio_data", "")
-    
-    # JavaScript for audio recording
-    recorder_html = """
-    <script>
-    // Counter to make key handling stable
-    let recordingCounter = 0;
-    
-    // Function to start recording after component loads
-    function setupRecorder() {
-        const recordButton = document.getElementById('recordButton');
-        const statusElement = document.getElementById('status');
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        let stream = null;
+# Upload audio file option
+st.subheader("Option 1: Upload an audio file")
+uploaded_file = st.file_uploader("Choose an audio file", type=["mp3", "wav", "m4a"])
+
+if uploaded_file and st.button("Transcribe Uploaded File"):
+    with st.spinner("Processing audio file..."):
+        # Get the audio data
+        audio_bytes = uploaded_file.getvalue()
         
-        // Make sure we can access the elements
-        if (!recordButton || !statusElement) {
-            console.error("Couldn't find required elements");
-            return;
-        }
+        # Upload to AssemblyAI
+        upload_url = upload_audio(audio_bytes)
         
-        // Make the button actually clickable
-        recordButton.addEventListener('click', async () => {
-            try {
-                if (!isRecording) {
-                    // Start recording
-                    statusElement.textContent = "Requesting microphone access...";
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream);
-                    audioChunks = [];
-                    
-                    mediaRecorder.addEventListener('dataavailable', event => {
-                        audioChunks.push(event.data);
-                    });
-                    
-                    mediaRecorder.addEventListener('stop', () => {
-                        statusElement.textContent = "Processing audio...";
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                        const reader = new FileReader();
-                        reader.readAsDataURL(audioBlob);
-                        reader.onloadend = () => {
-                            const base64data = reader.result.split(',')[1];
-                            // Send back to Streamlit
-                            const key = `recorder_${recordingCounter++}`;
-                            window.parent.postMessage({
-                                type: "streamlit:setComponentValue",
-                                value: base64data
-                            }, "*");
-                        };
-                    });
-                    
-                    mediaRecorder.start();
-                    isRecording = true;
-                    recordButton.textContent = "Stop Recording";
-                    recordButton.style.backgroundColor = "#ff5e5e";
-                    statusElement.textContent = "Recording... Speak now";
-                } else {
-                    // Stop recording
-                    mediaRecorder.stop();
-                    isRecording = false;
-                    recordButton.textContent = "Start Recording";
-                    recordButton.style.backgroundColor = "#4CAF50";
-                    statusElement.textContent = "Recording stopped, processing...";
-                    
-                    // Stop all tracks
-                    if (stream) {
-                        stream.getTracks().forEach(track => track.stop());
-                    }
-                }
-            } catch (err) {
-                statusElement.textContent = "Error: " + err.message;
-                console.error("Recording error:", err);
-            }
+        if upload_url:
+            # Start transcription
+            transcription_id = start_transcription(upload_url)
+            if transcription_id:
+                st.session_state.transcription_id = transcription_id
+                st.experimental_rerun()
+
+# Audio recording option
+st.subheader("Option 2: Record your voice")
+st.markdown("""
+⚠️ **Note:** The recording function works best in Chrome. You'll need to grant microphone permissions.
+""")
+
+# Create a JavaScript function to record audio
+record_js = """
+<script>
+function recordAudio() {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+        const mediaRecorder = new MediaRecorder(stream);
+        const audioChunks = [];
+        
+        // Start recording
+        mediaRecorder.start();
+        document.getElementById('rec_status').textContent = 'Recording... (speak now)';
+        document.getElementById('start_button').style.display = 'none';
+        document.getElementById('stop_button').style.display = 'inline-block';
+        
+        mediaRecorder.addEventListener('dataavailable', event => {
+            audioChunks.push(event.data);
         });
-    }
-    
-    // Setup when the document is loaded
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setupRecorder);
-    } else {
-        setupRecorder();
-    }
-    </script>
-    
-    <div style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
-        <button id="recordButton" style="padding: 12px 24px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-bottom: 15px;">
-            Start Recording
-        </button>
-        <p id="status" style="margin-top: 10px; font-style: italic;">Click the button to start recording</p>
-    </div>
-    """
-    
-    # Use the HTML component with a key for proper re-rendering
-    audio_data = html(recorder_html, height=200, key="recorder")
-    
-    # Return the received data if available
-    return audio_data
+        
+        // On stop
+        mediaRecorder.addEventListener('stop', () => {
+            document.getElementById('rec_status').textContent = 'Recording stopped - processing...';
+            
+            // Convert audio to base64
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = () => {
+                const base64Audio = reader.result.split(',')[1];
+                document.getElementById('audio_data').value = base64Audio;
+                document.getElementById('submit_audio').click();
+            };
+            
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop());
+        });
+        
+        // Set up stop button
+        document.getElementById('stop_button').addEventListener('click', () => {
+            mediaRecorder.stop();
+        });
+    })
+    .catch(err => {
+        document.getElementById('rec_status').textContent = 'Error accessing microphone: ' + err.message;
+    });
+}
+</script>
 
-# Display the recorder
-audio_data = recorder_component()
+<div style="display: flex; flex-direction: column; align-items: center; padding: 10px;">
+    <button id="start_button" onclick="recordAudio()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Start Recording
+    </button>
+    <button id="stop_button" style="display: none; padding: 10px 20px; background-color: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Stop Recording
+    </button>
+    <p id="rec_status" style="margin-top: 10px; font-style: italic;"></p>
+</div>
+"""
 
-# Hidden widget to capture audio data
-audio_receiver = st.text_input("Audio Data", key="audio_data", label_visibility="collapsed")
+# Display the recording interface
+st.markdown(record_js, unsafe_allow_html=True)
 
-# Process audio data if received
-if st.session_state.audio_data and st.session_state.audio_data != "":
-    # Check if we've already processed this audio
-    if "last_processed_audio" not in st.session_state or st.session_state.last_processed_audio != st.session_state.audio_data:
-        st.session_state.last_processed_audio = st.session_state.audio_data
-        process_audio(st.session_state.audio_data)
+# Hidden elements to receive data from JavaScript
+audio_data = st.text_input("Audio Data", key="audio_data", label_visibility="collapsed")
+submit_audio = st.button("Submit Audio", key="submit_audio", disabled=not audio_data)
 
-# Check status of ongoing transcription
+# Process the recorded audio when submitted
+if submit_audio and audio_data:
+    try:
+        # Decode the base64 audio
+        audio_bytes = base64.b64decode(audio_data)
+        
+        with st.spinner("Processing recorded audio..."):
+            # Upload to AssemblyAI
+            upload_url = upload_audio(audio_bytes)
+            
+            if upload_url:
+                # Start transcription
+                transcription_id = start_transcription(upload_url)
+                if transcription_id:
+                    st.session_state.transcription_id = transcription_id
+                    st.experimental_rerun()
+    except Exception as e:
+        st.error(f"Error processing audio: {str(e)}")
+
+# Check transcription status
 if st.session_state.transcription_id:
     status_placeholder = st.empty()
     
@@ -231,47 +200,45 @@ if st.session_state.transcription_id:
         # Poll for results
         complete = False
         start_time = time.time()
-        while not complete and time.time() - start_time < 60:  # Timeout after 60 seconds
+        
+        while not complete and time.time() - start_time < 120:  # Timeout after 2 minutes
             result = check_transcription_status(st.session_state.transcription_id)
             
             if result:
-                st.session_state.transcription_status = result["status"]
+                status = result.get("status")
                 
-                if result["status"] == "completed":
-                    st.session_state.transcription_result = result["text"]
-                    st.session_state.transcription_id = None  # Reset for next transcription
+                if status == "completed":
+                    st.session_state.transcription_result = result.get("text", "")
+                    st.session_state.transcription_id = None
                     complete = True
                     progress_bar.progress(100)
-                elif result["status"] == "error":
+                elif status == "error":
                     st.error(f"Transcription error: {result.get('error', 'Unknown error')}")
                     st.session_state.transcription_id = None
                     complete = True
-                elif result["status"] == "processing":
-                    # Update progress (approximate)
-                    progress = min(int((time.time() - start_time) / 60 * 100), 90)
-                    progress_bar.progress(progress)
-                    time.sleep(1)
                 else:
-                    # Just wait for queued or other statuses
-                    time.sleep(1)
+                    # Update progress (approximate)
+                    progress = min(int((time.time() - start_time) / 120 * 100), 90)
+                    progress_bar.progress(progress)
+                    time.sleep(2)  # Check every 2 seconds
             else:
-                time.sleep(1)
+                time.sleep(2)
         
         # Handle timeout
         if not complete:
             st.warning("Transcription is taking longer than expected. Please check results later or try again.")
             st.session_state.transcription_id = None
     
-    # Rerun to update the UI after transcription is complete
+    # Rerun to update the UI
     if complete:
         st.experimental_rerun()
 
 # Display transcription results
 if st.session_state.transcription_result:
-    st.markdown("### Transcription Result")
+    st.subheader("Transcription Result")
     st.write(st.session_state.transcription_result)
     
-    # Download button for transcript
+    # Download button
     st.download_button(
         label="Download Transcript",
         data=st.session_state.transcription_result,
@@ -279,21 +246,27 @@ if st.session_state.transcription_result:
         mime="text/plain"
     )
     
-    # Button to reset for a new recording
+    # New transcription button
     if st.button("New Transcription"):
         st.session_state.transcription_result = None
-        st.session_state.audio_data = None
-        st.session_state.last_processed_audio = None
         st.experimental_rerun()
 
 # Instructions
-with st.expander("Instructions", expanded=True):
+with st.expander("How to use this app"):
     st.markdown("""
-    1. Click **Start Recording** and grant microphone permissions when prompted
-    2. Speak clearly into your microphone
-    3. Click **Stop Recording** when you're finished
-    4. Wait while your audio is transcribed
-    5. View the transcription results and download if desired
+    ### Option 1: Upload an audio file
+    1. Click the "Browse files" button to upload an audio file
+    2. Click "Transcribe Uploaded File" to start the transcription process
     
-    **Note:** This app uses the AssemblyAI API to process your speech. Transcription typically takes a few seconds.
+    ### Option 2: Record your voice
+    1. Click "Start Recording" and grant microphone permissions when prompted
+    2. Speak clearly into your microphone
+    3. Click "Stop Recording" when finished
+    
+    ### What happens next
+    - The app will upload your audio to AssemblyAI
+    - You'll see a progress bar during transcription
+    - When complete, you can view and download your transcript
+    
+    **Note:** This app uses the AssemblyAI API to process your speech. Transcription typically takes a few seconds to minutes depending on the length of your audio.
     """)
