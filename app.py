@@ -3,6 +3,7 @@ import requests
 import json
 import time
 import base64
+from streamlit.components.v1 import html
 
 # App title and description
 st.title("Live Audio Transcription")
@@ -17,6 +18,30 @@ if 'transcription_result' not in st.session_state:
     st.session_state.transcription_result = None
 if 'audio_data' not in st.session_state:
     st.session_state.audio_data = None
+
+# Function to handle audio data from frontend
+def handle_audio_data():
+    if st.session_state.audio_data and st.session_state.audio_data != "":
+        process_audio(st.session_state.audio_data)
+        
+# Function to process audio data
+def process_audio(audio_base64):
+    with st.spinner("Processing audio..."):
+        try:
+            # Decode base64 audio data
+            audio_bytes = base64.b64decode(audio_base64)
+            
+            # Upload audio to AssemblyAI
+            upload_url = upload_audio(audio_bytes)
+            
+            if upload_url:
+                # Start transcription
+                transcription_id = start_transcription(upload_url)
+                if transcription_id:
+                    st.session_state.transcription_id = transcription_id
+                    st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Error processing audio: {str(e)}")
 
 # Get API key from Streamlit secrets
 api_key = st.secrets["assemblyai_api_key"]
@@ -80,102 +105,120 @@ def check_transcription_status(transcription_id):
         st.error(f"Error checking transcription status: {response.text}")
         return None
 
-# Create a container for our recording interface
-recording_container = st.container()
-
-with recording_container:
-    st.markdown("### Audio Recording")
+# Use Streamlit's component HTML for the audio recorder
+def recorder_component():
+    component_value = st.session_state.get("audio_data", "")
     
-    # Using the components.html method to inject our JavaScript
-    st.markdown("""
-    <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: 20px;">
-        <button id="record_button" onclick="toggleRecording()" 
-                style="background-color: #FF4B4B; color: white; padding: 10px 20px; 
-                border: none; border-radius: 5px; cursor: pointer; margin-bottom: 10px;">
-            Start Recording
-        </button>
-        <p id="recording_status"></p>
-    </div>
-    
+    # JavaScript for audio recording
+    recorder_html = """
     <script>
-        // We'll need to communicate with Streamlit
-        const recordButton = document.getElementById('record_button');
-        const recordingStatus = document.getElementById('recording_status');
+    // Counter to make key handling stable
+    let recordingCounter = 0;
+    
+    // Function to start recording after component loads
+    function setupRecorder() {
+        const recordButton = document.getElementById('recordButton');
+        const statusElement = document.getElementById('status');
         let mediaRecorder;
         let audioChunks = [];
         let isRecording = false;
+        let stream = null;
         
-        // Function to toggle recording state
-        async function toggleRecording() {
-            if (!isRecording) {
-                // Start recording
-                try {
-                    audioChunks = [];
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Make sure we can access the elements
+        if (!recordButton || !statusElement) {
+            console.error("Couldn't find required elements");
+            return;
+        }
+        
+        // Make the button actually clickable
+        recordButton.addEventListener('click', async () => {
+            try {
+                if (!isRecording) {
+                    // Start recording
+                    statusElement.textContent = "Requesting microphone access...";
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
                     
-                    mediaRecorder.ondataavailable = (event) => {
+                    mediaRecorder.addEventListener('dataavailable', event => {
                         audioChunks.push(event.data);
-                    };
+                    });
                     
-                    mediaRecorder.onstop = () => {
+                    mediaRecorder.addEventListener('stop', () => {
+                        statusElement.textContent = "Processing audio...";
                         const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                         const reader = new FileReader();
                         reader.readAsDataURL(audioBlob);
                         reader.onloadend = () => {
                             const base64data = reader.result.split(',')[1];
-                            // Send to Streamlit
+                            // Send back to Streamlit
+                            const key = `recorder_${recordingCounter++}`;
                             window.parent.postMessage({
                                 type: "streamlit:setComponentValue",
                                 value: base64data
                             }, "*");
                         };
-                    };
+                    });
                     
                     mediaRecorder.start();
                     isRecording = true;
-                    recordButton.innerText = "Stop Recording";
-                    recordButton.style.backgroundColor = "#4BD0FF";
-                    recordingStatus.innerText = "Recording... Speak now.";
-                } catch (err) {
-                    recordingStatus.innerText = "Error accessing microphone: " + err.message;
-                    console.error("Error accessing microphone:", err);
+                    recordButton.textContent = "Stop Recording";
+                    recordButton.style.backgroundColor = "#ff5e5e";
+                    statusElement.textContent = "Recording... Speak now";
+                } else {
+                    // Stop recording
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    recordButton.textContent = "Start Recording";
+                    recordButton.style.backgroundColor = "#4CAF50";
+                    statusElement.textContent = "Recording stopped, processing...";
+                    
+                    // Stop all tracks
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
                 }
-            } else {
-                // Stop recording
-                mediaRecorder.stop();
-                isRecording = false;
-                recordButton.innerText = "Start Recording";
-                recordButton.style.backgroundColor = "#FF4B4B";
-                recordingStatus.innerText = "Processing audio...";
+            } catch (err) {
+                statusElement.textContent = "Error: " + err.message;
+                console.error("Recording error:", err);
             }
-        }
+        });
+    }
+    
+    // Setup when the document is loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupRecorder);
+    } else {
+        setupRecorder();
+    }
     </script>
-    """, unsafe_allow_html=True)
+    
+    <div style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
+        <button id="recordButton" style="padding: 12px 24px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; margin-bottom: 15px;">
+            Start Recording
+        </button>
+        <p id="status" style="margin-top: 10px; font-style: italic;">Click the button to start recording</p>
+    </div>
+    """
+    
+    # Use the HTML component with a key for proper re-rendering
+    audio_data = html(recorder_html, height=200, key="recorder")
+    
+    # Return the received data if available
+    return audio_data
 
-# Create a streamlit component to receive audio data from JavaScript
-audio_data = st.text_input("Audio Data", key="audio_input", label_visibility="collapsed")
+# Display the recorder
+audio_data = recorder_component()
+
+# Hidden widget to capture audio data
+audio_receiver = st.text_input("Audio Data", key="audio_data", label_visibility="collapsed")
 
 # Process audio data if received
-if audio_data and audio_data != st.session_state.audio_data:
-    st.session_state.audio_data = audio_data
-    
-    with st.spinner("Processing audio..."):
-        # Decode base64 audio data
-        try:
-            audio_bytes = base64.b64decode(audio_data)
-            
-            # Upload audio to AssemblyAI
-            upload_url = upload_audio(audio_bytes)
-            
-            if upload_url:
-                # Start transcription
-                transcription_id = start_transcription(upload_url)
-                if transcription_id:
-                    st.session_state.transcription_id = transcription_id
-                    st.experimental_rerun()
-        except Exception as e:
-            st.error(f"Error processing audio: {str(e)}")
+if st.session_state.audio_data and st.session_state.audio_data != "":
+    # Check if we've already processed this audio
+    if "last_processed_audio" not in st.session_state or st.session_state.last_processed_audio != st.session_state.audio_data:
+        st.session_state.last_processed_audio = st.session_state.audio_data
+        process_audio(st.session_state.audio_data)
 
 # Check status of ongoing transcription
 if st.session_state.transcription_id:
@@ -240,6 +283,7 @@ if st.session_state.transcription_result:
     if st.button("New Transcription"):
         st.session_state.transcription_result = None
         st.session_state.audio_data = None
+        st.session_state.last_processed_audio = None
         st.experimental_rerun()
 
 # Instructions
